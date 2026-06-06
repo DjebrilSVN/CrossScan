@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crossscan"
+version = "0.1.0"
+description = "Cross-Modality 3D CT/MRI Segmentation with Out-of-Distribution Robustness and Self-Auditing Quality Control"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "CrossScan Team"}
+]
+keywords = [
+    "medical-imaging",
+    "deep-learning",
+    "3d-segmentation",
+    "ct-mri",
+    "domain-randomization",
+    "conformal-prediction",
+    "dicom-seg"
+]
+dependencies = [
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "monai>=1.3.0",
+    "nibabel>=5.0.0",
+    "SimpleITK>=2.3.0",
+    "pydicom>=2.4.0",
+    "highdicom>=0.22.0",
+    "dicom2nifti>=2.4.8",
+    "scipy>=1.11.0",
+    "scikit-image>=0.22.0",
+    "scikit-learn>=1.3.0",
+    "pandas>=2.1.0",
+    "numpy>=1.24.0",
+    "tqdm>=4.66.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "einops>=0.7.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.11.0",
+    "ruff>=0.1.6"
+]
+
+[project.scripts]
+crossscan = "crossscan.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["crossscan*"]
+
