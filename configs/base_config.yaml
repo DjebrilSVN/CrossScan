@@ -1,0 +1,34 @@
+# CrossScan Base Configuration
+project_name: "CrossScan"
+version: "0.1.0"
+seed: 42
+
+data:
+  target_spacing: [1.5, 1.5, 1.5]  # isotropic mm
+  target_orientation: "RAS"
+  ct_hu_window: [-160.0, 240.0]     # Abdominal soft-tissue HU window
+  mri_percentiles: [0.5, 99.5]
+  mri_n4_bias_correct: true
+  num_classes: 9                    # 0: Background + 8 anatomical structures
+  batch_size: 2
+  patch_size: [96, 96, 96]
+  cache_rate: 1.0
+
+training:
+  epochs: 250
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-5
+  scheduler: "cosine"
+  mixed_precision: true             # AMP FP16
+  gradient_clip: 1.0
+  dice_weight: 1.0
+  ce_weight: 1.0
+
+reliability:
+  tta_enabled: true
+  tta_passes: 8
+  conformal_alpha: 0.10            # 90% expected Dice on accepted cohort
+  auto_accept_threshold: 0.85
+  hard_reject_threshold: 0.60
+  regressor_type: "gbr"
+

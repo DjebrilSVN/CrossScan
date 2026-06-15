@@ -1,0 +1,27 @@
+# CrossScan Joint Modality-Agnostic Model Configuration
+model:
+  name: "CrossScanJointSegmentor"
+  in_channels: 1
+  out_classes: 9
+  feature_size: 32
+  num_scales: 4
+  deep_supervision: true
+  use_domain_randomization: true
+
+domain_randomization:
+  noise_prob: 0.5
+  rician_sigma_range: [0.02, 0.12]
+  bias_field_prob: 0.5
+  bias_field_magnitude: [0.2, 0.6]
+  ghosting_prob: 0.35
+  num_ghosts: 4
+  thickness_prob: 0.35
+  thickness_factors: [2, 3, 4]
+  gamma_range: [0.7, 1.5]
+
+inference:
+  sw_roi_size: [96, 96, 96]
+  sw_overlap: 0.5
+  sw_batch_size: 1
+  mode: "gaussian"
+
