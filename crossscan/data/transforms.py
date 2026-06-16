@@ -7,6 +7,7 @@ N4ITK bias correction and robust z-score normalization for MRI), and
 Metrics Reloaded compliance.
 """
 
+from pathlib import Path
 from typing import Dict, Optional, Sequence, Tuple, Union
 import numpy as np
 import SimpleITK as sitk
@@ -14,6 +15,7 @@ import torch
 
 from monai.transforms import (
     Compose,
+    LoadImage,
     EnsureChannelFirstd,
     EnsureTyped,
     Orientationd,
@@ -153,6 +155,33 @@ class NormalizeRadiometryDict(MapTransform):
         return d
 
 
+class EnsureImageLoadedDict(MapTransform):
+    """
+    Loads 3D image and label volumes into MONAI MetaTensors if file paths are given;
+    leaves arrays and tensors untouched.
+    """
+    def __init__(self, keys: Sequence[str]):
+        super().__init__(keys)
+        self.loader = LoadImage(image_only=False)
+
+    def __call__(self, data: Dict) -> Dict:
+        d = dict(data)
+        for k in self.keys:
+            val = d.get(k)
+            if isinstance(val, (str, Path)):
+                p = Path(val)
+                if p.exists():
+                    loaded, meta = self.loader(str(p))
+                    d[k] = loaded
+                    d[f"{k}_meta_dict"] = meta
+        return d
+
+
+def is_foreground_voxel(x: Union[torch.Tensor, np.ndarray]) -> Union[torch.Tensor, np.ndarray]:
+    """Top-level picklable predicate for foreground cropping across multi-worker loaders."""
+    return x > 0.01
+
+
 def get_harmonized_spatial_pipeline(
     target_spacing: Tuple[float, float, float] = (1.5, 1.5, 1.5),
     patch_size: Optional[Tuple[int, int, int]] = (96, 96, 96),
@@ -163,6 +192,7 @@ def get_harmonized_spatial_pipeline(
     uniform voxel spacing, foreground cropping, and training patch sampling.
     """
     transforms = [
+        EnsureImageLoadedDict(keys=["image", "label"]),
         EnsureChannelFirstd(keys=["image", "label"]),
         Orientationd(keys=["image", "label"], axcodes="RAS"),
         Spacingd(
@@ -171,7 +201,7 @@ def get_harmonized_spatial_pipeline(
             mode=("bilinear", "nearest")
         ),
         NormalizeRadiometryDict(keys=["image"], modality_key="modality"),
-        CropForegroundd(keys=["image", "label"], source_key="image", select_fn=lambda x: x > 0.01),
+        CropForegroundd(keys=["image", "label"], source_key="image", select_fn=is_foreground_voxel),
     ]
     
     if is_training and patch_size is not None:
