@@ -118,10 +118,26 @@ def generate_data_splits_manifest(
         if not lbl_p.exists():
             lbl_p = Path(str(img_p).replace("image", "label"))
             
-        # Determine modality
-        modality = "ct" if "ct" in img_p.name.lower() or "ct" in str(img_p.parent).lower() else "mr"
-        
-        patient_id = img_p.name.split(".")[0].split("_")[0]
+        stem = img_p.name.replace(".nii.gz", "").replace(".nii", "")
+        for suffix in ["_prep", "_image", "_0000"]:
+            if stem.endswith(suffix):
+                stem = stem[:-len(suffix)]
+        patient_id = stem
+
+        # Determine modality accurately
+        name_lower = img_p.name.lower()
+        parent_lower = str(img_p.parent).lower()
+        if "_ct" in name_lower or "_ct" in parent_lower or "\\ct\\" in parent_lower or "/ct/" in parent_lower:
+            modality = "ct"
+        elif "_mr" in name_lower or "_mr" in parent_lower or "\\mr\\" in parent_lower or "/mr/" in parent_lower:
+            modality = "mr"
+        else:
+            # Official AMOS convention: 0001-0500 is CT, 0501-0600 is MRI
+            digits = "".join(filter(str.isdigit, stem))
+            if digits and int(digits) <= 500:
+                modality = "ct"
+            else:
+                modality = "mr"
         entries.append({
             "patient_id": patient_id,
             "image": str(img_p.resolve()),
@@ -129,24 +145,46 @@ def generate_data_splits_manifest(
             "modality": modality
         })
         
-    # Group by patient
+    # Group by modality to ensure stratified cross-modality representation
     rng = np.random.RandomState(random_seed)
-    patients = sorted(list(set(e["patient_id"] for e in entries)))
-    rng.shuffle(patients)
-    
-    n_p = len(patients)
-    n_train = int(n_p * train_ratio)
-    n_val = int(n_p * val_ratio)
-    
-    train_patients = set(patients[:n_train])
-    val_patients = set(patients[n_train:n_train + n_val])
-    test_patients = set(patients[n_train + n_val:])
-    
-    splits = {
-        "train": [e for e in entries if e["patient_id"] in train_patients],
-        "val": [e for e in entries if e["patient_id"] in val_patients],
-        "test": [e for e in entries if e["patient_id"] in test_patients],
-    }
+    by_modality: Dict[str, List[str]] = {}
+    patient_entries: Dict[str, Dict[str, str]] = {}
+    for e in entries:
+        p_id = e["patient_id"]
+        mod = e["modality"]
+        by_modality.setdefault(mod, []).append(p_id)
+        patient_entries[p_id] = e
+
+    splits = {"train": [], "val": [], "test": []}
+    for mod, p_list in by_modality.items():
+        unique_p = sorted(list(set(p_list)))
+        rng.shuffle(unique_p)
+        n_p = len(unique_p)
+        if n_p == 1:
+            splits["train"].append(patient_entries[unique_p[0]])
+        elif n_p == 2:
+            splits["train"].append(patient_entries[unique_p[0]])
+            splits["val"].append(patient_entries[unique_p[1]])
+        elif n_p == 3:
+            splits["train"].append(patient_entries[unique_p[0]])
+            splits["val"].append(patient_entries[unique_p[1]])
+            splits["test"].append(patient_entries[unique_p[2]])
+        else:
+            n_train = max(1, int(round(n_p * train_ratio)))
+            n_val = max(1, int(round(n_p * val_ratio)))
+            if n_train + n_val >= n_p:
+                n_train = max(1, n_p - 2)
+                n_val = 1
+            train_p = set(unique_p[:n_train])
+            val_p = set(unique_p[n_train:n_train + n_val])
+            test_p = set(unique_p[n_train + n_val:])
+            for p in unique_p:
+                if p in train_p:
+                    splits["train"].append(patient_entries[p])
+                elif p in val_p:
+                    splits["val"].append(patient_entries[p])
+                else:
+                    splits["test"].append(patient_entries[p])
     
     out_p = Path(output_manifest_path)
     out_p.parent.mkdir(parents=True, exist_ok=True)
