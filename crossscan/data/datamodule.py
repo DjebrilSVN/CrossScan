@@ -5,6 +5,7 @@ Supports multi-dataset loading (AMOS, TotalSegmentator, CHAOS), dynamic modality
 online physics domain randomization, masked annotation tracking, and patient stratification.
 """
 
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 import json
@@ -108,7 +109,7 @@ class CrossScanDataModule:
         target_spacing: Tuple[float, float, float] = (1.5, 1.5, 1.5),
         patch_size: Tuple[int, int, int] = (96, 96, 96),
         batch_size: int = 2,
-        num_workers: int = 2,
+        num_workers: int = 0 if os.name == "nt" else 2,
         use_cache: bool = False,
         cache_rate: float = 1.0,
         cache_dir: Optional[Union[str, Path]] = None
