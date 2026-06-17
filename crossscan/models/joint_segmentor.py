@@ -82,6 +82,9 @@ class CrossScanJointSegmentor(nn.Module):
             x = self.domain_randomizer(x)
             
         outputs = self.net(x)
+        if torch.is_tensor(outputs) and outputs.ndim == 6:
+            if not self.training:
+                return outputs[:, 0]
         return outputs
 
     def extract_bottleneck_representation(self, x: torch.Tensor) -> torch.Tensor:
@@ -113,11 +116,19 @@ class CrossScanJointSegmentor(nn.Module):
         Enables seamless execution on 8GB local RTX 3080 GPUs.
         """
         self.eval()
+        def _predictor(patch: torch.Tensor) -> torch.Tensor:
+            res = self.net(patch)
+            if torch.is_tensor(res) and res.ndim == 6:
+                return res[:, 0]
+            if isinstance(res, (list, tuple)):
+                return res[0]
+            return res
+
         logits = sliding_window_inference(
             inputs=volume,
             roi_size=roi_size,
             sw_batch_size=sw_batch_size,
-            predictor=lambda patch: self.net(patch),
+            predictor=_predictor,
             overlap=overlap,
             mode=mode,
             progress=False
