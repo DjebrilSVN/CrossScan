@@ -5,7 +5,7 @@ Crucial for training on heterogeneous public datasets (AMOS, TotalSegmentator, C
 where specific structures are missing from annotations without falsely penalizing the model.
 """
 
-from typing import List, Optional, Sequence, Union
+from typing import List, Optional, Sequence, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -130,7 +130,8 @@ class MaskedCrossEntropyLoss(nn.Module):
 
 class HarmonizedCrossScanLoss(nn.Module):
     """
-    Composite loss combining Masked Soft Dice and Masked Cross-Entropy.
+    Composite loss combining Masked Soft Dice and Masked Cross-Entropy,
+    with native multi-scale deep supervision support.
     """
     def __init__(
         self,
@@ -146,10 +147,34 @@ class HarmonizedCrossScanLoss(nn.Module):
 
     def forward(
         self,
-        logits: torch.Tensor,
+        logits: Union[torch.Tensor, List[torch.Tensor], Tuple[torch.Tensor, ...]],
         targets: torch.Tensor,
-        present_mask: Optional[torch.Tensor] = None
+        present_mask: Optional[torch.Tensor] = None,
+        weights: Optional[List[float]] = None
     ) -> torch.Tensor:
+        if torch.is_tensor(logits) and logits.ndim == 6:
+            logits = [logits[:, i] for i in range(logits.shape[1])]
+
+        if isinstance(logits, (list, tuple)):
+            if weights is None:
+                raw_weights = [1.0 / (2.0 ** i) for i in range(len(logits))]
+                total_w = sum(raw_weights)
+                weights = [w / total_w for w in raw_weights]
+                
+            total_loss = torch.tensor(0.0, device=targets.device)
+            t_float = targets.float()
+            for w, pred in zip(weights, logits):
+                if pred.shape[2:] != targets.shape[2:]:
+                    # Nearest-neighbor downsample discrete label map
+                    t_scale = F.interpolate(t_float, size=pred.shape[2:], mode="nearest").long()
+                else:
+                    t_scale = targets
+                    
+                l_dice = self.dice_loss(pred, t_scale, present_mask=present_mask)
+                l_ce = self.ce_loss(pred, t_scale, present_mask=present_mask)
+                total_loss = total_loss + w * (self.dice_weight * l_dice + self.ce_weight * l_ce)
+            return total_loss
+            
         loss_dice = self.dice_loss(logits, targets, present_mask=present_mask)
         loss_ce = self.ce_loss(logits, targets, present_mask=present_mask)
         return self.dice_weight * loss_dice + self.ce_weight * loss_ce
