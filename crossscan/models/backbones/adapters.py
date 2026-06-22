@@ -114,6 +114,8 @@ def inject_lora_into_model(
     """
     adapted_count = 0
     for name, module in list(model.named_children()):
+        if isinstance(module, (LoRA3DConv, LoRALinear)):
+            continue
         if inject_conv3d and isinstance(module, nn.Conv3d) and module.kernel_size[0] > 1:
             lora_conv = LoRA3DConv(module, rank=target_conv_rank, alpha=target_alpha)
             setattr(model, name, lora_conv)
