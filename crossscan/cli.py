@@ -86,6 +86,71 @@ def download_manifest(
     console.print(f"[bold]License:[/bold] {src.license}")
 
 
+@app.command()
+def prepare_cohort(
+    raw_dir: Path = typer.Option(Path("./data/raw"), "--raw-dir", "-r", help="Directory containing raw scans"),
+    output_dir: Path = typer.Option(Path("./data/processed"), "--out", "-o", help="Target processed directory"),
+    splits_out: Path = typer.Option(Path("./data/splits.json"), "--splits-out", "-s", help="Path for splits JSON"),
+    n4_bias_correct: bool = typer.Option(False, "--n4", help="Apply N4ITK bias field correction for MRI")
+):
+    """Harmonize multi-modality raw scans into canonical RAS+, normalized radiometry, and 8-organ space."""
+    import subprocess
+    import sys
+    cmd = [
+        sys.executable, "scripts/prepare_data.py", "prepare-cohort",
+        "--raw-dir", str(raw_dir),
+        "--out", str(output_dir),
+        "--splits-out", str(splits_out)
+    ]
+    if n4_bias_correct:
+        cmd.append("--n4")
+    subprocess.run(cmd, check=True)
+
+
+@app.command()
+def benchmark(
+    ct_baseline: Optional[Path] = typer.Option(None, "--ct-baseline", help="CT baseline checkpoint"),
+    mr_baseline: Optional[Path] = typer.Option(None, "--mr-baseline", help="MRI baseline checkpoint"),
+    joint_model: Optional[Path] = typer.Option(None, "--joint", help="Joint model checkpoint"),
+    num_eval_cases: int = typer.Option(15, "--num-cases", "-n", help="Number of evaluation cases")
+):
+    """Run the 3-arm benchmark matrix and evaluate cross-modality domain collapse."""
+    from scripts.benchmark_models import run_benchmark
+    run_benchmark(checkpoint_ct_baseline=ct_baseline, checkpoint_mr_baseline=mr_baseline, checkpoint_joint=joint_model, num_eval_cases=num_eval_cases)
+
+
+@app.command()
+def audit_contamination():
+    """Audit evaluation test cohorts against published foundation model pretraining rosters."""
+    from scripts.audit_contamination import audit
+    audit()
+
+
+@app.command()
+def train_adapter(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to splits JSON"),
+    output_dir: Path = typer.Option(Path("./checkpoints/foundation_adapter"), "--out", "-o", help="Checkpoint directory"),
+    rank: int = typer.Option(8, "--rank", "-r", help="LoRA rank"),
+    epochs: int = typer.Option(5, "--epochs", "-e", help="Training epochs"),
+    batch_size: int = typer.Option(2, "--batch-size", "-b", help="Batch size"),
+    lr: float = typer.Option(5e-4, "--lr", help="Learning rate")
+):
+    """Fine-tune 3D parameter-efficient LoRA adapter on clinical data."""
+    from scripts.train_adapter import train as train_lora
+    train_lora(splits_path=splits_path, output_dir=output_dir, lora_rank=rank, epochs=epochs, batch_size=batch_size, lr=lr)
+
+
+@app.command()
+def evaluate_interactive(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to splits JSON"),
+    target_dice: float = typer.Option(0.85, "--target-dice", "-t", help="Target Dice score"),
+    max_clicks: int = typer.Option(10, "--max-clicks", "-m", help="Max allowable clicks")
+):
+    """Simulate radiologist interactive correction and measure Clicks-to-Target-Dice (C2D)."""
+    from scripts.evaluate_interactive import evaluate as eval_interact
+    eval_interact(test_splits=splits_path, target_dice=target_dice, max_clicks=max_clicks)
+
+
 if __name__ == "__main__":
     app()
 
