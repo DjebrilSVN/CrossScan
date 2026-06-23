@@ -1,4 +1,7 @@
 """Robustness evaluation battery: natural fleet shifts and synthetic physical perturbations."""
-from crossscan.robustness.natural_shifts import simulate_mri_field_strength
+from crossscan.robustness.natural_shifts import (
+    simulate_mri_field_strength,
+    simulate_mri_sequence_shift,
+)
 
-__all__ = ["simulate_mri_field_strength"]
+__all__ = ["simulate_mri_field_strength", "simulate_mri_sequence_shift"]
