@@ -1,48 +1,96 @@
-"""Calibrated synthetic physical perturbations for stress-testing segmentor tolerance."""
-from typing import Tuple
+"""
+Synthetic Physical Perturbation Battery for Stress-Testing Volumetric Segmentors.
+
+Applies calibrated, physics-derived imaging corruptions to evaluate out-of-distribution
+failure modes and quantify graceful degradation:
+1. Patient Motion Artifacts (k-space phase perturbation simulating respiratory/cardiac movement).
+2. Radiofrequency B1 Inhomogeneity (severe coil sensitivity profiles).
+3. Rician & Gaussian Thermal Noise.
+4. Slice Thickness Degradation (thick-slice clinical acquisition).
+5. Truncated Field of View (FOV) anatomy cutoff.
+"""
+
+from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import scipy.ndimage as ndi
+import torch
+
+from crossscan.data.domain_randomization import (
+    RandomRicianNoise,
+    RandomB1BiasField,
+    RandomMRIPhaseGhosting,
+    RandomSliceThicknessDegradation
+)
 
 
-def apply_kspace_motion_artifacts(volume: np.ndarray, num_ghosts: int = 4, intensity: float = 0.25) -> np.ndarray:
-    """Simulates periodic discrete k-space phase-encode modulation artifacts (respiratory/pulsatile ghosting)."""
-    fft = np.fft.fftn(volume, axes=(-2, -1))
-    ghost_vol = np.zeros_like(volume)
-    H = volume.shape[-2]
-    step = max(1, H // (num_ghosts * 2))
-    for shift in range(-num_ghosts, num_ghosts + 1):
-        if shift == 0:
-            continue
-        rolled = np.roll(volume, shift * step, axis=-2)
-        ghost_vol += intensity * (1.0 / abs(shift)) * rolled
-    return np.clip(volume + ghost_vol, 0.0, 1.0).astype(np.float32)
+def apply_kspace_motion_artifacts(
+    image: np.ndarray,
+    num_ghosts: int = 4,
+    intensity: float = 0.25
+) -> np.ndarray:
+    """
+    Simulates respiratory motion ghosting via k-space phase modulation along phase-encode axis.
+    """
+    img_t = torch.from_numpy(image).unsqueeze(0).unsqueeze(0)
+    ghost_op = RandomMRIPhaseGhosting(prob=1.0, num_ghosts=num_ghosts, intensity_range=(intensity, intensity))
+    corrupted_t = ghost_op(img_t)
+    return corrupted_t.squeeze().numpy().astype(np.float32)
 
 
-def apply_b1_inhomogeneity(volume: np.ndarray, magnitude: float = 0.5) -> np.ndarray:
-    """Applies low-frequency smooth polynomial B1 transmit/receive bias field inhomogeneity."""
-    shape = volume.shape
-    z, y, x = np.meshgrid(
-        np.linspace(-1, 1, shape[0]),
-        np.linspace(-1, 1, shape[1]),
-        np.linspace(-1, 1, shape[2]),
-        indexing="ij"
-    )
-    bias = 1.0 + magnitude * (0.35 * x + 0.25 * y**2 - 0.2 * z**2 + 0.15 * x * y)
-    bias = bias / np.mean(bias)
-    return np.clip(volume * bias, 0.0, 1.0).astype(np.float32)
+def apply_b1_inhomogeneity(
+    image: np.ndarray,
+    magnitude: float = 0.6
+) -> np.ndarray:
+    """
+    Simulates severe B1 transmit/receive coil sensitivity drop-off.
+    """
+    img_t = torch.from_numpy(image).unsqueeze(0).unsqueeze(0)
+    bias_op = RandomB1BiasField(prob=1.0, magnitude_range=(magnitude, magnitude))
+    corrupted_t = bias_op(img_t)
+    return corrupted_t.squeeze().numpy().astype(np.float32)
 
 
-def apply_rician_noise(volume: np.ndarray, sigma: float = 0.08) -> np.ndarray:
-    """Injects MR-physics Rician noise from orthogonal complex Gaussian channels: sqrt((I + N_r)^2 + N_i^2)."""
-    n_real = np.random.normal(0, sigma, volume.shape)
-    n_imag = np.random.normal(0, sigma, volume.shape)
-    rician = np.sqrt((volume + n_real)**2 + n_imag**2)
-    return np.clip(rician, 0.0, 1.0).astype(np.float32)
+def apply_rician_noise(
+    image: np.ndarray,
+    sigma: float = 0.08
+) -> np.ndarray:
+    """
+    Simulates Rician noise: sqrt((I + N(0, s))^2 + N(0, s)^2).
+    """
+    img_t = torch.from_numpy(image).unsqueeze(0).unsqueeze(0)
+    noise_op = RandomRicianNoise(prob=1.0, sigma_range=(sigma, sigma))
+    corrupted_t = noise_op(img_t)
+    return corrupted_t.squeeze().numpy().astype(np.float32)
 
 
-def apply_slice_thickness_degradation(volume: np.ndarray, downsample_factor: int = 3) -> np.ndarray:
-    """Simulates thick-slice low-resolution clinical protocols via axial blur and subsampling."""
-    blurred = ndi.gaussian_filter1d(volume, sigma=downsample_factor * 0.6, axis=0)
-    subsampled = blurred[::downsample_factor, :, :]
-    restored = ndi.zoom(subsampled, (volume.shape[0] / subsampled.shape[0], 1.0, 1.0), order=1)
-    return np.clip(restored, 0.0, 1.0).astype(np.float32)
+def apply_slice_thickness_degradation(
+    image: np.ndarray,
+    downsample_factor: int = 3
+) -> np.ndarray:
+    """
+    Simulates thick-slice clinical imaging via slice-direction averaging and subsampling.
+    """
+    img_t = torch.from_numpy(image).unsqueeze(0).unsqueeze(0)
+    slice_op = RandomSliceThicknessDegradation(prob=1.0, downsample_factors=(downsample_factor,))
+    corrupted_t = slice_op(img_t)
+    return corrupted_t.squeeze().numpy().astype(np.float32)
+
+
+def apply_fov_truncation(
+    image: np.ndarray,
+    crop_fraction: float = 0.15
+) -> np.ndarray:
+    """
+    Simulates patient truncation when anatomy exceeds scanner bore / FOV limits.
+    """
+    img = image.copy()
+    d, h, w = img.shape
+    # Zero out lateral margins (w-axis) and anterior margins (y-axis)
+    w_crop = int(w * crop_fraction)
+    y_crop = int(h * crop_fraction)
+    
+    img[:, :y_crop, :] = 0.0
+    img[:, :, :w_crop] = 0.0
+    img[:, :, w - w_crop:] = 0.0
+    return img.astype(np.float32)
+
