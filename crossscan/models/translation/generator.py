@@ -1,39 +1,87 @@
-"""3D Residual U-Net Architecture for Volumetric CT <-> MRI Translation."""
+"""
+3D Cross-Modality Volumetric Translation Engine (CT <-> MRI).
+
+Implements a 3D Residual translation network for synthesizing pseudo-MRI from CT volumes
+(or pseudo-CT from MRI), establishing the synthetic translation benchmark arm
+to compare against native physics domain randomization.
+"""
+
+from typing import Dict, Optional, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class ConvBlock3D(nn.Module):
-    def __init__(self, in_c: int, out_c: int, stride: int = 1):
-        super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv3d(in_c, out_c, kernel_size=3, stride=stride, padding=1, bias=False),
-            nn.InstanceNorm3d(out_c, affine=True),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv3d(out_c, out_c, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.InstanceNorm3d(out_c, affine=True)
-        )
-        self.skip = nn.Identity() if in_c == out_c and stride == 1 else nn.Sequential(
-            nn.Conv3d(in_c, out_c, kernel_size=1, stride=stride, bias=False),
-            nn.InstanceNorm3d(out_c, affine=True)
-        )
-        self.relu = nn.LeakyReLU(0.2, inplace=True)
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.relu(self.conv(x) + self.skip(x))
-
-
-class ResBlock3D(nn.Module):
+class ResidualBlock3D(nn.Module):
+    """3D Residual Block with Instance Normalization and LeakyReLU."""
     def __init__(self, channels: int):
         super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(channels, affine=True),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Conv3d(channels, channels, kernel_size=3, padding=1, bias=False),
-            nn.InstanceNorm3d(channels, affine=True)
+        self.conv = nn.Sequential(
+            nn.Conv3d(channels, channels, kernel_size=3, padding=1),
+            nn.InstanceNorm3d(channels),
+            nn.LeakyReLU(0.01, inplace=True),
+            nn.Conv3d(channels, channels, kernel_size=3, padding=1),
+            nn.InstanceNorm3d(channels)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.conv(x)
+
+
+class CrossModality3DTranslator(nn.Module):
+    """
+    3D Translation Generator mapping CT <-> MRI volumes.
+    Preserves anatomical geometry while transforming radiodensity into magnetic resonance contrast.
+    """
+    def __init__(
+        self,
+        in_channels: int = 1,
+        out_channels: int = 1,
+        base_features: int = 32,
+        num_res_blocks: int = 4
+    ):
+        super().__init__()
+        # Initial projection
+        self.in_conv = nn.Sequential(
+            nn.Conv3d(in_channels, base_features, kernel_size=3, padding=1),
+            nn.InstanceNorm3d(base_features),
+            nn.LeakyReLU(0.01, inplace=True)
         )
         
+        # Downsampling
+        self.down1 = nn.Sequential(
+            nn.Conv3d(base_features, base_features * 2, kernel_size=3, stride=2, padding=1),
+            nn.InstanceNorm3d(base_features * 2),
+            nn.LeakyReLU(0.01, inplace=True)
+        )
+        
+        # Residual Bottleneck
+        res_blocks = [ResidualBlock3D(base_features * 2) for _ in range(num_res_blocks)]
+        self.bottleneck = nn.Sequential(*res_blocks)
+        
+        # Upsampling
+        self.up1 = nn.Sequential(
+            nn.ConvTranspose3d(base_features * 2, base_features, kernel_size=3, stride=2, padding=1, output_padding=1),
+            nn.InstanceNorm3d(base_features),
+            nn.LeakyReLU(0.01, inplace=True)
+        )
+        
+        # Output reconstruction
+        self.out_conv = nn.Sequential(
+            nn.Conv3d(base_features, out_channels, kernel_size=3, padding=1),
+            nn.Sigmoid()  # Normalized radiometry [0, 1]
+        )
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + self.block(x)
+        h0 = self.in_conv(x)
+        h1 = self.down1(h0)
+        bot = self.bottleneck(h1)
+        up = self.up1(bot)
+        
+        # Handle odd spatial dimensions if needed
+        if up.shape[2:] != x.shape[2:]:
+            up = F.interpolate(up, size=x.shape[2:], mode="trilinear", align_corners=False)
+            
+        out = self.out_conv(up)
+        return out
+
