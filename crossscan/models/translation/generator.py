@@ -85,3 +85,6 @@ class CrossModality3DTranslator(nn.Module):
         out = self.out_conv(up)
         return out
 
+    def get_trainable_parameters(self) -> int:
+        """Returns the total number of trainable generator parameters."""
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
