@@ -60,3 +60,16 @@ def test_synthetic_perturbations_execution():
     fov = apply_fov_truncation(vol, crop_fraction=0.1)
     assert fov.shape == vol.shape
     assert (fov[:, :2, :] == 0).all()
+
+from crossscan.models.translation.generator import CrossModality3DTranslator
+
+
+def test_cross_modality_3d_translator():
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    translator = CrossModality3DTranslator(base_features=8, num_res_blocks=2).to(dev)
+    
+    x = torch.randn(1, 1, 16, 32, 32, device=dev)
+    out = translator(x)
+    
+    assert out.shape == (1, 1, 16, 32, 32)
+    assert (out >= 0.0).all() and (out <= 1.0).all()
