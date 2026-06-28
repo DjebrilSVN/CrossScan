@@ -47,7 +47,7 @@ def train(
     epochs: int = typer.Option(5, "--epochs", "-e", help="Training epochs"),
     batch_size: int = typer.Option(1, "--batch-size", "-b", help="Batch size"),
     lr: float = typer.Option(1e-3, "--lr", help="Learning rate"),
-    device: str = typer.Option("cuda" if torch.cuda.is_available() else "cpu", "--device", help="Compute device")
+    device: Optional[str] = typer.Option(None, "--device", help="Compute device")
 ):
     """Fine-tunes 3D cross-modality translator."""
     output_dir.mkdir(parents=True, exist_ok=True)
