@@ -42,3 +42,12 @@ def compute_slice_averaged_ssim(vol1: np.ndarray, vol2: np.ndarray) -> float:
         score = ssim(slice1, slice2, data_range=data_range)
         scores.append(score)
     return float(np.mean(scores))
+
+
+def compute_volume_conservation(mask_orig: np.ndarray, mask_trans: np.ndarray, organ_id: int) -> float:
+    """Measures relative volumetric distortion: |V_trans - V_orig| / V_orig."""
+    v_orig = np.sum(mask_orig == organ_id)
+    v_trans = np.sum(mask_trans == organ_id)
+    if v_orig == 0:
+        return 0.0 if v_trans == 0 else 1.0
+    return float(abs(v_trans - v_orig) / v_orig)
