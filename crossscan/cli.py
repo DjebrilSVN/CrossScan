@@ -154,3 +154,23 @@ def evaluate_interactive(
 if __name__ == "__main__":
     app()
 
+@app.command()
+def audit_hallucination(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to splits JSON"),
+    checkpoint: Optional[Path] = typer.Option(None, "--checkpoint", "-c", help="Path to translator weights")
+):
+    """Audit generative cross-modality translation for anatomical hallucinations and volume dissolution."""
+    from scripts.audit_hallucination import audit as audit_halluc
+    audit_halluc(test_splits=splits_path, checkpoint_translator=checkpoint)
+
+
+@app.command()
+def train_translation(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to data splits JSON"),
+    output_dir: Path = typer.Option(Path("./checkpoints/translation"), "--out", "-o", help="Checkpoint output directory"),
+    epochs: int = typer.Option(5, "--epochs", "-e", help="Training epochs"),
+    batch_size: int = typer.Option(1, "--batch-size", "-b", help="Batch size")
+):
+    """Train 3D volumetric translation generator (CT <-> MRI) with gradient edge consistency."""
+    from scripts.train_translation import train as train_transl
+    train_transl(splits_path=splits_path, output_dir=output_dir, epochs=epochs, batch_size=batch_size)
