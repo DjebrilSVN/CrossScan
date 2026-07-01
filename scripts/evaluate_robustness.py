@@ -33,7 +33,7 @@ from crossscan.robustness.synthetic_perturbations import (
     apply_fov_truncation
 )
 
-app = typer.Typer(help="CrossScan Robustness Evaluation CLI")
+app = typer.Typer(help="CrossScan Robustness Evaluation & Physical Stress-Test CLI")
 console = Console()
 
 
