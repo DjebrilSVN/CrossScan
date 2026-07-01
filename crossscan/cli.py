@@ -151,8 +151,18 @@ def evaluate_interactive(
     eval_interact(test_splits=splits_path, target_dice=target_dice, max_clicks=max_clicks)
 
 
-if __name__ == "__main__":
-    app()
+@app.command()
+def evaluate_robustness(
+    mode: str = typer.Option("both", "--mode", "-m", help="Shift mode: natural, synthetic, or both"),
+    num_cases: int = typer.Option(15, "--num-cases", "-n", help="Number of bootstrap evaluation samples")
+):
+    """Benchmark performance degradation across natural fleet shifts and synthetic perturbations."""
+    from scripts.evaluate_robustness import benchmark_natural_shifts, benchmark_synthetic_shifts
+    if mode in ["natural", "both"]:
+        benchmark_natural_shifts(num_cases=num_cases)
+    if mode in ["synthetic", "both"]:
+        benchmark_synthetic_shifts(num_synthetic_cases=num_cases)
+
 
 @app.command()
 def audit_hallucination(
@@ -174,3 +184,8 @@ def train_translation(
     """Train 3D volumetric translation generator (CT <-> MRI) with gradient edge consistency."""
     from scripts.train_translation import train as train_transl
     train_transl(splits_path=splits_path, output_dir=output_dir, epochs=epochs, batch_size=batch_size)
+
+
+if __name__ == "__main__":
+    app()
+
