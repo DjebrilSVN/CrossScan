@@ -213,3 +213,42 @@ def get_harmonized_spatial_pipeline(
     transforms.append(EnsureTyped(keys=["image", "label"], track_meta=False))
     return Compose(transforms)
 
+
+def load_and_preprocess_volume(
+    file_path: Union[str, Path],
+    modality: str = "ct",
+    target_shape: Optional[Tuple[int, int, int]] = (64, 128, 128)
+) -> torch.Tensor:
+    """
+    Loads and preprocesses a 3D NIfTI or MetaImage volume into a standardized tensor.
+    Interpolates to target_shape (default: 64x128x128) to prevent GPU VRAM exhaustion.
+    Returns:
+        (1, D, H, W) normalized float32 tensor.
+    """
+    file_path = Path(file_path)
+    import nibabel as nib
+    import torch.nn.functional as F
+    img = nib.load(str(file_path))
+    arr = img.get_fdata().astype(np.float32)
+    # NIfTI shape is typically (X, Y, Z); transpose to (Z, Y, X) for PyTorch (D, H, W)
+    if arr.ndim == 3:
+        arr = np.transpose(arr, (2, 1, 0))
+    
+    if modality.lower() in ["ct", "computed_tomography"]:
+        norm_arr = normalize_ct(arr)
+    else:
+        norm_arr = normalize_mri(arr)
+        
+    tensor = torch.from_numpy(norm_arr).float().unsqueeze(0).unsqueeze(0)  # (1, 1, D, H, W)
+    if target_shape is not None:
+        tensor = F.interpolate(tensor, size=target_shape, mode="trilinear", align_corners=False)
+    else:
+        # Pad to multiple of 16
+        d, h, w = tensor.shape[2:]
+        pad_d = (16 - d % 16) % 16
+        pad_h = (16 - h % 16) % 16
+        pad_w = (16 - w % 16) % 16
+        if pad_d > 0 or pad_h > 0 or pad_w > 0:
+            tensor = F.pad(tensor, (0, pad_w, 0, pad_h, 0, pad_d), mode="constant", value=0.0)
+    return tensor.squeeze(0)  # (1, D, H, W)
+
