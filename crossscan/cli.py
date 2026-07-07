@@ -186,6 +186,38 @@ def train_translation(
     train_transl(splits_path=splits_path, output_dir=output_dir, epochs=epochs, batch_size=batch_size)
 
 
+@app.command()
+def train_qc(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to data splits JSON"),
+    checkpoint: Optional[Path] = typer.Option(Path("./checkpoints/joint_model/joint_model_best.pt"), "--checkpoint", "-c", help="Joint model checkpoint"),
+    output_dir: Path = typer.Option(Path("./checkpoints/reliability"), "--out", "-o", help="Reliability output directory")
+):
+    """Train Mahalanobis OOD shift detector and label-free Quality Control regressor."""
+    from scripts.train_qc_regressor import train as train_qc_fn
+    train_qc_fn(splits_path=splits_path, checkpoint_segmentor=checkpoint, output_dir=output_dir)
+
+
+@app.command()
+def calibrate_conformal(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to data splits JSON"),
+    alpha: float = typer.Option(0.10, "--alpha", "-a", help="Target risk budget (error bound <= alpha)"),
+    output_dir: Path = typer.Option(Path("./checkpoints/reliability"), "--out", "-o", help="Output directory")
+):
+    """Calibrate Conformal Risk Control (CRC) error bounds and selective risk-coverage trade-offs."""
+    from scripts.calibrate_conformal import calibrate as calibrate_fn
+    calibrate_fn(splits_path=splits_path, target_risk_alpha=alpha, output_dir=output_dir)
+
+
+@app.command()
+def run_triage(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to data splits JSON"),
+    checkpoint: Optional[Path] = typer.Option(Path("./checkpoints/joint_model/joint_model_best.pt"), "--checkpoint", "-c", help="Joint model checkpoint"),
+    reliability_dir: Path = typer.Option(Path("./checkpoints/reliability"), "--rel-dir", "-r", help="Reliability models directory")
+):
+    """Execute end-to-end 3-tier clinical triage (Auto-Accept, Review, Reject) on test scans."""
+    from scripts.run_clinical_triage import triage as triage_fn
+    triage_fn(splits_path=splits_path, checkpoint_segmentor=checkpoint, reliability_dir=reliability_dir)
+
+
 if __name__ == "__main__":
     app()
-
