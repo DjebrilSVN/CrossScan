@@ -45,3 +45,51 @@ class OrthancDICOMwebClient:
                 return {"is_online": True, "version": data.get("Version", "Unknown")}
         except Exception as e:
             return {"is_online": False, "version": f"Offline ({e})"}
+
+    def create_stow_multipart_payload(self, dicom_bytes: bytes) -> Tuple[bytes, str]:
+        """
+        Creates standard multipart/related payload for STOW-RS transmission.
+        Type: application/dicom
+        """
+        boundary = "----CrossScanDicomWebBoundary7MA4YWxkTrZu0gW"
+        body = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/dicom\r\n\r\n"
+        ).encode("utf-8") + dicom_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+        
+        content_type = f'multipart/related; type="application/dicom"; boundary={boundary}'
+        return body, content_type
+
+    def stow_store_instance(
+        self,
+        dicom_file_path: Union[str, Path]
+    ) -> Dict[str, Union[bool, str, int]]:
+        """
+        Transmits a DICOM or DICOM-SEG object to Orthanc via STOW-RS.
+        """
+        dicom_file_path = Path(dicom_file_path)
+        if not dicom_file_path.exists():
+            raise FileNotFoundError(f"DICOM file not found: {dicom_file_path}")
+            
+        dicom_bytes = dicom_file_path.read_bytes()
+        body, content_type = self.create_stow_multipart_payload(dicom_bytes)
+        url = f"{self.dicomweb_endpoint}/studies"
+        
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", content_type)
+        if self.auth:
+            import base64
+            creds = base64.b64encode(f"{self.auth[0]}:{self.auth[1]}".encode()).decode()
+            req.add_header("Authorization", f"Basic {creds}")
+            
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                status_code = resp.status
+                return {"success": True, "status_code": status_code, "url": url}
+        except urllib.error.URLError as e:
+            # Standalone/offline clinical simulation
+            return {
+                "success": False,
+                "status_code": getattr(e, "code", 503),
+                "error": f"Orthanc server unreachable at {self.base_url} (simulated offline PACS): {e}"
+            }
