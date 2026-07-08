@@ -93,3 +93,26 @@ class OrthancDICOMwebClient:
                 "status_code": getattr(e, "code", 503),
                 "error": f"Orthanc server unreachable at {self.base_url} (simulated offline PACS): {e}"
             }
+
+    def qido_query_studies(self, patient_id: Optional[str] = None) -> List[Dict]:
+        """Queries PACS archives for matching patient studies via QIDO-RS."""
+        query_url = f"{self.dicomweb_endpoint}/studies"
+        if patient_id:
+            query_url += f"?PatientID={patient_id}"
+            
+        req = urllib.request.Request(query_url)
+        req.add_header("Accept", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return json.loads(resp.read().decode())
+        except Exception:
+            return []
+
+    def get_ohif_viewer_url(self, study_instance_uid: str) -> str:
+        """Returns direct web link to inspect segmentation in OHIF Viewer."""
+        return f"{self.base_url}/ohif/viewer?StudyInstanceUIDs={study_instance_uid}"
+
+    def get_slicer_command(self, dicom_dir: Union[str, Path], seg_file: Union[str, Path]) -> str:
+        """Generates 3D Slicer CLI command to launch and overlay DICOM-SEG on background scan."""
+        return f'Slicer.exe --load-dicom "{dicom_dir}" --load "{seg_file}"'
+
