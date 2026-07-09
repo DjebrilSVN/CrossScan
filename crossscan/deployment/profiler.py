@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.amp import autocast
+import onnx
 
 from crossscan.models.joint_segmentor import CrossScanJointSegmentor
 from crossscan.core.ontology import NUM_CLASSES
@@ -84,3 +85,55 @@ class InferenceProfiler:
             "precision": "FP16 (AMP)" if use_amp else "FP32",
             "volume_shape": f"{volume_shape[0]}x{volume_shape[1]}x{volume_shape[2]}"
         }
+
+    def export_onnx(
+        self,
+        output_path: Union[str, Path],
+        input_shape: Tuple[int, int, int] = (32, 64, 64),
+        opset_version: int = 17
+    ) -> Path:
+        """
+        Exports the 3D model architecture to standard ONNX with dynamic spatial axes.
+        """
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        
+        self.model.eval()
+        dummy_input = torch.randn(1, 1, *input_shape, device=self.device)
+        
+        # Wrapper to strip deep supervision list in eval mode
+        class ExportWrapper(nn.Module):
+            def __init__(self, base_model):
+                super().__init__()
+                self.base = base_model
+            def forward(self, x):
+                out = self.base(x)
+                if isinstance(out, (list, tuple)):
+                    return out[0]
+                if torch.is_tensor(out) and out.ndim == 6:
+                    return out[:, 0]
+                return out
+
+        wrapper = ExportWrapper(self.model).to(self.device)
+        
+        torch.onnx.export(
+            wrapper,
+            dummy_input,
+            str(out_p),
+            export_params=True,
+            opset_version=opset_version,
+            do_constant_folding=True,
+            input_names=["input_volume"],
+            output_names=["segmentation_logits"],
+            dynamic_axes={
+                "input_volume": {0: "batch_size", 2: "depth", 3: "height", 4: "width"},
+                "segmentation_logits": {0: "batch_size", 2: "depth", 3: "height", 4: "width"}
+            }
+        )
+        
+        # Verify ONNX model validity
+        onnx_model = onnx.load(str(out_p))
+        onnx.checker.check_model(onnx_model)
+        
+        return out_p
+
