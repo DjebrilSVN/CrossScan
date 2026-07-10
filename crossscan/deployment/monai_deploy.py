@@ -51,3 +51,29 @@ class HarmonizationOperator:
         data["tensor"] = tensor
         data["original_shape"] = (d, h, w)
         return data
+
+
+class CrossScanInferenceOperator:
+    """Executes joint segmentor inference."""
+    def __init__(self, model: CrossScanJointSegmentor, device: torch.device):
+        self.model = model
+        self.device = device
+
+    def compute(self, data: Dict) -> Dict:
+        tensor = data["tensor"].to(self.device)
+        self.model.eval()
+        with torch.no_grad():
+            logits = self.model(tensor)
+            if torch.is_tensor(logits) and logits.ndim == 6:
+                logits = logits[:, 0]
+            probs = F.softmax(logits, dim=1)
+            pred_mask = torch.argmax(probs, dim=1)[0].cpu().numpy()
+            latent = self.model.extract_bottleneck_representation(tensor).cpu().numpy()[0]
+            
+        orig_d, orig_h, orig_w = data["original_shape"]
+        pred_mask_unpad = pred_mask[:orig_d, :orig_h, :orig_w]
+        
+        data["pred_mask"] = pred_mask_unpad
+        data["probs"] = probs[0, :, :orig_d, :orig_h, :orig_w].cpu().numpy()
+        data["latent"] = latent
+        return data
