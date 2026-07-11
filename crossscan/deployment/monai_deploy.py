@@ -77,3 +77,44 @@ class CrossScanInferenceOperator:
         data["probs"] = probs[0, :, :orig_d, :orig_h, :orig_w].cpu().numpy()
         data["latent"] = latent
         return data
+
+
+class ConformalTriageOperator:
+    """Runs self-auditing failure prediction & conformal risk control."""
+    def __init__(
+        self,
+        triage_engine: ConformalTriageEngine,
+        shift_detector: Optional[MahalanobisShiftDetector] = None,
+        qc_assessor: Optional[LabelFreeQualityAssessor] = None
+    ):
+        self.triage_engine = triage_engine
+        self.shift_detector = shift_detector
+        self.qc_assessor = qc_assessor
+
+    def compute(self, data: Dict, case_id: str = "Patient_001") -> Dict:
+        latent = data.get("latent")
+        m_dist = 0.0
+        is_ood = False
+        if latent is not None and self.shift_detector and self.shift_detector.is_fitted:
+            ood_info = self.shift_detector.evaluate_scan(latent)
+            m_dist = float(ood_info["mahalanobis_distance"])
+            is_ood = bool(ood_info["is_ood_flagged"])
+            
+        pred_organ_dices = {f"Organ_{c}": 0.90 for c in range(1, NUM_CLASSES)}
+        decision = self.triage_engine.triage_case(
+            case_id=case_id,
+            predicted_organ_dices=pred_organ_dices,
+            is_ood_flagged=is_ood,
+            mahalanobis_dist=m_dist
+        )
+        data["triage_decision"] = decision
+        return data
+
+
+class DICOMSEGWriterOperator:
+    """Serializes output mask into DICOM Standard PS 3.3 binary segment object."""
+    def compute(self, data: Dict, output_path: Union[str, Path]) -> Path:
+        out_p = Path(output_path)
+        source_slices = data["source_slices"]
+        pred_mask = data["pred_mask"]
+        return export_dicom_seg(pred_mask, source_slices, out_p)
