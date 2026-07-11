@@ -118,3 +118,41 @@ class DICOMSEGWriterOperator:
         source_slices = data["source_slices"]
         pred_mask = data["pred_mask"]
         return export_dicom_seg(pred_mask, source_slices, out_p)
+
+
+class CrossScanDeployApp:
+    """
+    Complete MONAI Deploy Application Package composition.
+    """
+    def __init__(
+        self,
+        model: CrossScanJointSegmentor,
+        device: torch.device,
+        triage_engine: Optional[ConformalTriageEngine] = None,
+        shift_detector: Optional[MahalanobisShiftDetector] = None
+    ):
+        self.loader_op = DICOMDataLoaderOperator()
+        self.harmonize_op = HarmonizationOperator()
+        self.infer_op = CrossScanInferenceOperator(model, device)
+        self.triage_op = ConformalTriageOperator(
+            triage_engine=triage_engine or ConformalTriageEngine(),
+            shift_detector=shift_detector
+        )
+        self.seg_writer_op = DICOMSEGWriterOperator()
+
+    def run(
+        self,
+        series_dir: Union[str, Path],
+        output_seg_path: Union[str, Path],
+        modality: str = "ct",
+        case_id: str = "Clinical_Case"
+    ) -> Dict:
+        """Executes the full pipeline from DICOM in to DICOM-SEG + Triage out."""
+        data = self.loader_op.compute(series_dir)
+        data = self.harmonize_op.compute(data, modality=modality)
+        data = self.infer_op.compute(data)
+        data = self.triage_op.compute(data, case_id=case_id)
+        seg_file = self.seg_writer_op.compute(data, output_seg_path)
+        data["seg_file"] = seg_file
+        return data
+
