@@ -219,5 +219,28 @@ def run_triage(
     triage_fn(splits_path=splits_path, checkpoint_segmentor=checkpoint, reliability_dir=reliability_dir)
 
 
+@app.command()
+def profile_inference(
+    checkpoint: Optional[Path] = typer.Option(Path("./checkpoints/joint_model/joint_model_best.pt"), "--checkpoint", "-c", help="Joint model checkpoint"),
+    output_dir: Path = typer.Option(Path("./checkpoints/deployment"), "--out", "-o", help="Deployment output directory"),
+    onnx_name: str = typer.Option("crossscan_joint.onnx", "--onnx-name", help="Exported ONNX file name")
+):
+    """Benchmark inference latency, GPU memory, and export validated 3D ONNX model."""
+    from scripts.profile_inference import profile as profile_fn
+    profile_fn(checkpoint=checkpoint, output_dir=output_dir, onnx_name=onnx_name)
+
+
+@app.command()
+def export_dicomweb(
+    splits_path: Path = typer.Option(Path("./data/splits.json"), "--splits", "-s", help="Path to data splits JSON"),
+    checkpoint: Optional[Path] = typer.Option(Path("./checkpoints/joint_model/joint_model_best.pt"), "--checkpoint", "-c", help="Joint model checkpoint"),
+    output_dir: Path = typer.Option(Path("./output/dicom_export"), "--out", "-o", help="Output directory for DICOM-SEG"),
+    orthanc_url: str = typer.Option("http://localhost:8042", "--orthanc", help="Orthanc PACS server URL")
+):
+    """Generate standard DICOM-SEG and transmit to Orthanc PACS via STOW-RS."""
+    from scripts.export_dicomweb import export as export_fn
+    export_fn(splits_path=splits_path, checkpoint=checkpoint, output_dir=output_dir, orthanc_url=orthanc_url)
+
+
 if __name__ == "__main__":
     app()
