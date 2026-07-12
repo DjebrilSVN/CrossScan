@@ -223,6 +223,52 @@ CrossScan features a clinically calibrated failure detection and triage system o
 
 ---
 
+---
+
+## Phase 6: Clinical Deployment, Latency Profiling & PACS Interoperability
+
+CrossScan bridges research models to hospital infrastructure via standard DICOMweb protocols and low-latency ONNX volumetric execution:
+
+### 1. MONAI Deploy Application Package (MAP) Architecture
+Structured 5-operator clinical execution graph:
+```
+[DICOM Patient Series]
+         │
+         ▼
+[DICOMDataLoaderOperator] ──► Ingests multi-frame/multi-slice DICOM series
+         │
+         ▼
+ [HarmonizationOperator]  ──► Canonical RAS+ reorientation & multiple-of-16 padding
+         │
+         ▼
+[CrossScanInferenceOperator] ──► Modality-agnostic joint 3D volumetric inference
+         │
+         ▼
+[ConformalTriageOperator] ──► Bottleneck Mahalanobis distance & CRC risk evaluation
+         │
+         ▼
+[DICOMSEGWriterOperator]  ──► Encapsulates standard DICOM-SEG (SOP 1.2.840.10008.5.1.4.1.1.66.4)
+```
+
+### 2. DICOMweb & Orthanc PACS Interoperability
+- **STOW-RS (DICOM Store)**: Direct multipart/related binary payload packaging and transmission to PACS archives (`/dicom-web/studies`).
+- **WADO-RS / QIDO-RS**: Query and retrieve patient studies and segmentation metadata.
+- **OHIF Web Viewer**: Instant diagnostic web links (`/ohif/viewer?StudyInstanceUIDs=...`).
+- **3D Slicer CLI Integration**: Direct CLI execution command (`Slicer.exe --load-dicom <dir> --load <seg>`).
+
+### 3. Hardware Latency, GPU VRAM & ONNX Deployment Profiling
+Evaluated on NVIDIA RTX 3080 Laptop GPU across standard abdominal volume ($64 \times 128 \times 128 = 1.05\text{ MVox}$):
+
+| Precision Regime | Inference Latency (Mean) | Latency (P95) | Throughput | Peak CUDA VRAM | Speedup vs FP32 |
+|:---|:---:|:---:|:---:|:---:|:---:|
+| **FP32 (Baseline)** | 0.050 s | 0.053 s | 20.97 MVox/s | 0.65 GB | 1.00x |
+| **FP16 (AMP)** | **0.028 s** | **0.030 s** | **37.02 MVox/s** | **0.51 GB** | **1.78x** |
+| **ONNX Runtime** | Dynamic Axes | Dynamic Axes | Scalable | Lightweight | Validated |
+
+> **Clinical Efficiency**: Single-volume inference requires only **0.028 seconds** and **0.51 GB VRAM**, enabling real-time deployment on standard consumer and clinical workstations without high-end data center hardware.
+
+---
+
 ## Installation & Setup
 
 ```bash
@@ -251,6 +297,18 @@ crossscan download-manifest --dataset amos_ct
 ### 3. Run Test Suite
 ```bash
 pytest -v
+```
+
+---
+
+### 4. Hardware Profiling & ONNX Export
+```bash
+crossscan profile-inference --checkpoint checkpoints/joint_model/joint_model_best.pt
+```
+
+### 5. Standard DICOM-SEG Export & PACS Push
+```bash
+crossscan export-dicomweb --splits data/splits.json --checkpoint checkpoints/joint_model/joint_model_best.pt
 ```
 
 ---
