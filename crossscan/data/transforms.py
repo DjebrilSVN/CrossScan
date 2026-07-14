@@ -37,6 +37,8 @@ def normalize_ct(
     
     Default window: [-160, 240] HU covers liver, spleen, kidneys, pancreas, and vessels.
     """
+    if image.min() >= -0.05 and image.max() <= 1.05 and (image.max() - image.min()) > 0.05:
+        return np.clip(image, 0.0, 1.0).astype(np.float32)
     clipped = np.clip(image, hu_min, hu_max)
     normalized = (clipped - hu_min) / (hu_max - hu_min + 1e-8)
     return normalized.astype(np.float32)
