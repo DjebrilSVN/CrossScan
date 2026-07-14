@@ -23,7 +23,7 @@ class OrthancDICOMwebClient:
         self,
         base_url: str = "http://localhost:8042",
         dicomweb_root: str = "/dicom-web",
-        auth: Optional[Tuple[str, str]] = None,
+        auth: Optional[Tuple[str, str]] = ("orthanc", "orthanc"),
         timeout_seconds: float = 5.0
     ):
         self.base_url = base_url.rstrip("/")
@@ -114,5 +114,12 @@ class OrthancDICOMwebClient:
 
     def get_slicer_command(self, dicom_dir: Union[str, Path], seg_file: Union[str, Path]) -> str:
         """Generates 3D Slicer CLI command to launch and overlay DICOM-SEG on background scan."""
-        return f'Slicer.exe --load-dicom "{dicom_dir}" --load "{seg_file}"'
+        import os
+        local_app = Path(os.environ.get("LOCALAPPDATA", "")) / "slicer.org"
+        slicer_bin = "Slicer.exe"
+        if local_app.exists():
+            matches = sorted(list(local_app.glob("**/Slicer.exe")))
+            if matches:
+                slicer_bin = f'"{matches[-1]}"'
+        return f'{slicer_bin} --load-dicom "{dicom_dir}" --load "{seg_file}"'
 
