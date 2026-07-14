@@ -70,6 +70,27 @@ def load_dicom_series(
     return volume, spacing, slices
 
 
+def rgb_to_cielab_dicom(r: int, g: int, b: int) -> List[int]:
+    """Convert sRGB [0, 255] to DICOM RecommendedDisplayCIELabValue [0, 65535]."""
+    r_lin = ((r / 255.0 + 0.055) / 1.055) ** 2.4 if (r / 255.0) > 0.04045 else (r / 255.0) / 12.92
+    g_lin = ((g / 255.0 + 0.055) / 1.055) ** 2.4 if (g / 255.0) > 0.04045 else (g / 255.0) / 12.92
+    b_lin = ((b / 255.0 + 0.055) / 1.055) ** 2.4 if (b / 255.0) > 0.04045 else (b / 255.0) / 12.92
+    x = r_lin * 0.4124 + g_lin * 0.3576 + b_lin * 0.1805
+    y = r_lin * 0.2126 + g_lin * 0.7152 + b_lin * 0.0722
+    z = r_lin * 0.0193 + g_lin * 0.1192 + b_lin * 0.9505
+    def f(t: float) -> float:
+        return t ** (1/3) if t > 0.008856 else (7.787 * t) + (16 / 116)
+    fx, fy, fz = f(x / 0.95047), f(y / 1.0), f(z / 1.08883)
+    L = max(0.0, min(100.0, (116.0 * fy) - 16.0))
+    a = (fx - fy) * 500.0
+    b = (fy - fz) * 200.0
+    return [
+        int(round(L * 65535.0 / 100.0)),
+        int(round(max(0.0, min(255.0, a + 128.0)) * 65535.0 / 255.0)),
+        int(round(max(0.0, min(255.0, b + 128.0)) * 65535.0 / 255.0))
+    ]
+
+
 def export_dicom_seg(
     pred_mask: np.ndarray,
     source_slices: List[Dataset],
@@ -83,6 +104,7 @@ def export_dicom_seg(
     - FrameOfReferenceUID
     - PatientID, PatientName, StudyInstanceUID
     - Standard Coded Anatomy via SNOMED CT and RadLex
+    - Per-Frame SegmentIdentificationSequence for standard PACS/OHIF compliance
     """
     out_file = Path(output_path)
     out_file.parent.mkdir(parents=True, exist_ok=True)
@@ -126,10 +148,36 @@ def export_dicom_seg(
     ds.PhotometricInterpretation = "MONOCHROME2"
     ds.SegmentationType = "BINARY"
     
-    # Build Segment Sequence with standard SNOMED CT codes
-    segment_sequence = []
-    frames = []
+    # Referenced Series Sequence (points directly to source image series)
+    if source_slices:
+        ref_series_item = Dataset()
+        ref_series_item.SeriesInstanceUID = getattr(ref, "SeriesInstanceUID", generate_uid())
+        ref_instances = []
+        for s in source_slices:
+            inst = Dataset()
+            inst.ReferencedSOPClassUID = getattr(s, "SOPClassUID", "1.2.840.10008.5.1.4.1.1.2")
+            inst.ReferencedSOPInstanceUID = getattr(s, "SOPInstanceUID", generate_uid())
+            ref_instances.append(inst)
+        ref_series_item.ReferencedInstanceSequence = ref_instances
+        ds.ReferencedSeriesSequence = [ref_series_item]
+        
+        # Shared Functional Groups Sequence (Spacing & Orientation)
+        shared_fg = Dataset()
+        pm = Dataset()
+        pm.PixelSpacing = getattr(ref, "PixelSpacing", ["1.5", "1.5"])
+        pm.SliceThickness = getattr(ref, "SliceThickness", "1.5")
+        shared_fg.PixelMeasuresSequence = [pm]
+        po = Dataset()
+        po.ImageOrientationPatient = getattr(ref, "ImageOrientationPatient", ["1.0", "0.0", "0.0", "0.0", "1.0", "0.0"])
+        shared_fg.PlaneOrientationSequence = [po]
+        ds.SharedFunctionalGroupsSequence = [shared_fg]
     
+    # Build Segment Sequence and multi-frame binary pixel data
+    segment_sequence = []
+    per_frame_groups = []
+    frame_byte_chunks = []
+    
+    seg_idx = 1
     for c in range(1, NUM_CLASSES):
         mask_c = (pred_mask == c)
         if not np.any(mask_c):
@@ -137,10 +185,13 @@ def export_dicom_seg(
             
         organ_meta = ORGAN_ONTOLOGY[c]
         seg_item = Dataset()
-        seg_item.SegmentNumber = c
+        seg_item.SegmentNumber = seg_idx
         seg_item.SegmentLabel = organ_meta.display_name
         seg_item.SegmentAlgorithmType = "AUTOMATIC"
         seg_item.SegmentAlgorithmName = "CrossScan-Joint3D"
+        
+        # CIELab display color
+        seg_item.RecommendedDisplayCIELabValue = rgb_to_cielab_dicom(*organ_meta.rgb_color)
         
         # SNOMED CT Coded Sequence
         code_item = Dataset()
@@ -157,13 +208,40 @@ def export_dicom_seg(
         
         segment_sequence.append(seg_item)
         
+        # Pack frames for this segment
+        for z in range(num_frames):
+            slice_mask = mask_c[z]
+            if not np.any(slice_mask):
+                continue
+                
+            ffg = Dataset()
+            if z < len(source_slices):
+                pp = Dataset()
+                pp.ImagePositionPatient = getattr(source_slices[z], "ImagePositionPatient", ["0.0", "0.0", f"{z*1.5:.2f}"])
+                ffg.PlanePositionSequence = [pp]
+                deriv = Dataset()
+                src_img = Dataset()
+                src_img.ReferencedSOPClassUID = getattr(source_slices[z], "SOPClassUID", "1.2.840.10008.5.1.4.1.1.2")
+                src_img.ReferencedSOPInstanceUID = getattr(source_slices[z], "SOPInstanceUID", generate_uid())
+                deriv.SourceImageSequence = [src_img]
+                ffg.DerivationImageSequence = [deriv]
+                
+            # Mandated by DICOM PS 3.3 C.8.20.4 for OHIF / PACS parsing
+            sis = Dataset()
+            sis.ReferencedSegmentNumber = seg_idx
+            ffg.SegmentIdentificationSequence = [sis]
+            per_frame_groups.append(ffg)
+            
+            # Bit-pack 1-bit binary frame (padded to full byte)
+            packed_frame = np.packbits(slice_mask.astype(np.uint8)).tobytes()
+            frame_byte_chunks.append(packed_frame)
+            
+        seg_idx += 1
+        
     ds.SegmentSequence = segment_sequence
-    
-    # Store binary pixel data (bit-packed)
-    binary_vol = (pred_mask > 0).astype(np.uint8)
-    packed_bytes = np.packbits(binary_vol).tobytes()
-    ds.PixelData = packed_bytes
-    ds.NumberOfFrames = num_frames
+    ds.PerFrameFunctionalGroupsSequence = per_frame_groups
+    ds.NumberOfFrames = len(per_frame_groups)
+    ds.PixelData = b"".join(frame_byte_chunks)
     
     ds.save_as(str(out_file), write_like_original=False)
     return out_file
