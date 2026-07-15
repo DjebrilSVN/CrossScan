@@ -242,5 +242,27 @@ def export_dicomweb(
     export_fn(splits_path=splits_path, checkpoint=checkpoint, output_dir=output_dir, orthanc_url=orthanc_url)
 
 
+
+
+@app.command()
+def run_ablations(
+    output_path: Path = typer.Option(Path("./output/ablation_study_results.json"), "--out", "-o", help="Output JSON path for ablation metrics"),
+    random_seed: int = typer.Option(42, "--seed", "-s", help="Bootstrap random seed")
+):
+    """Execute multi-factor ablation study across all 7 architectural conditions."""
+    from scripts.run_ablations import run as run_ablations_fn
+    run_ablations_fn(output_path=output_path, random_seed=random_seed)
+
+
+@app.command()
+def generate_gallery(
+    output_path: Path = typer.Option(Path("./output/clinical_demo_gallery.html"), "--out", "-o", help="Output HTML file path"),
+    open_browser: bool = typer.Option(False, "--open", help="Open gallery in web browser upon creation")
+):
+    """Generate the interactive clinical demo gallery HTML report."""
+    from scripts.generate_gallery import generate as generate_gallery_fn
+    generate_gallery_fn(output_path=output_path, open_browser=open_browser)
+
+
 if __name__ == "__main__":
     app()
