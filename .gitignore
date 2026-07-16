@@ -38,9 +38,12 @@ sanity_check_output/
 /datasets/
 /raw_data/
 /processed_data/
+/output/dicom_export/
 *.nii
 *.nii.gz
 *.dcm
+*.nrrd
+*.seg.nrrd
 *.mha
 *.mhd
 
